@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مدير النقاط التوبوغرافية - UTM Zone 31N</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <style>
+        body { font-family: 'Cairo', sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        #map { height: 100%; min-height: 500px; }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .utm-input { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 2px solid #0ea5e9; }
+        .utm-input:focus { border-color: #0284c7; box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2); }
+        .coord-box { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-right: 4px solid #f59e0b; }
+        .login-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .login-box { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
+        .hidden { display: none !important; }
+        .role-badge { position: fixed; top: 80px; left: 20px; z-index: 1000; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .admin-badge { background: #dc2626; color: white; }
+        .viewer-badge { background: #059669; color: white; }
+        .sync-indicator { position: fixed; bottom: 20px; left: 20px; z-index: 1000; padding: 8px 16px; border-radius: 20px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+        .sync-success { background: #d1fae5; color: #065f46; }
+        .sync-loading { background: #fef3c7; color: #92400e; }
+        .sync-error { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<!-- صفحة تسجيل الدخول -->
+<div id="loginPage" class="login-bg">
+    <div class="login-box">
+        <div class="text-center mb-6">
+            <svg class="w-16 h-16 text-purple-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+            </svg>
+            <h1 class="text-2xl font-bold text-gray-800">مدير النقاط التوبوغرافية</h1>
+            <p class="text-gray-500 text-sm mt-2">UTM Zone 31N - الجزائر</p>
+        </div>
+        
+        <div class="space-y-4">
+            <div>
+                <label class="block text-gray-700 font-bold mb-2">اسم المستخدم</label>
+                <input type="text" id="loginUsername" class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 focus:border-purple-500 outline-none text-center font-bold" placeholder="أدخل اسم المستخدم">
+            </div>
+            <div>
+                <label class="block text-gray-700 font-bold mb-2">كلمة المرور</label>
+                <input type="password" id="loginPassword" class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 focus:border-purple-500 outline-none text-center font-bold" placeholder="أدخل كلمة المرور">
+            </div>
+            <button onclick="handleLogin()" class="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-bold hover:shadow-lg transition">
+                دخول
+            </button>
+        </div>
+        
+        <div class="mt-6 text-center text-sm text-gray-500">
+            <p>👤 زائر: اسم 0000 / كلمة 0000</p>
+            <p class="mt-1 text-xs text-gray-400">🔴 الأدمن: اتصل بالمسؤول للحصول على بيانات الدخول</p>
+        </div>
+    </div>
+</div>
+
+<!-- المحتوى الرئيسي -->
+<div id="mainContent" class="hidden">
+    
+    <div id="roleBadge" class="role-badge"></div>
+    <div id="syncIndicator" class="sync-indicator sync-loading hidden">
+        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span id="syncText">جاري المزامنة...</span>
+    </div>
+
+    <header class="gradient-bg text-white shadow-lg">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                    </svg>
+                    <div>
+                        <h1 class="text-2xl font-bold">مدير النقاط التوبوغرافية</h1>
+                        <span class="text-xs bg-white/20 px-2 py-1 rounded">UTM Zone 31N - الجزائر</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="syncData()" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition flex items-center gap-2" title="تحديث البيانات">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        تحديث
+                    </button>
+                    <span id="userDisplay" class="text-sm bg-white/20 px-3 py-1 rounded"></span>
+                    <button onclick="logout()" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                        </svg>
+                        خروج
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container mx-auto px-4 py-6">
+        
+        <div class="mb-6 bg-blue-50 border-r-4 border-blue-500 p-4 rounded-lg">
+            <h3 class="font-bold text-blue-900 mb-2">📍 نظام الإحداثيات: UTM Zone 31N (EPSG:32631)</h3>
+            <p class="text-blue-800 text-sm">
+                المنطقة المغطاة: الجزائر وشمال غرب أفريقيا. 
+                <br>أدخل الإحداثيات كما تظهر في الجهاز: <strong>Easting (X)</strong> و <strong>Northing (Y)</strong>
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <div class="lg:col-span-1 space-y-4">
+                
+                <div id="uploadSection" class="glass rounded-2xl p-6 shadow-xl border-2 border-blue-300 hidden">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        رفع ملف النقاط (UTM)
+                    </h2>
+                    
+                    <div class="border-2 border-dashed border-blue-400 rounded-xl p-6 text-center hover:bg-blue-50 transition cursor-pointer" onclick="document.getElementById('utmFileInput').click()">
+                        <input type="file" id="utmFileInput" accept=".txt,.csv" class="hidden" onchange="handleUTMFileUpload(event)">
+                        <svg class="w-12 h-12 text-blue-500 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <p class="text-gray-700 font-semibold">اضغط لرفع ملف TXT/CSV</p>
+                    </div>
+
+                    <div class="mt-3 bg-gray-100 p-3 rounded text-xs font-mono text-gray-700">
+                        <p class="font-bold mb-1">صيغة الملف:</p>
+                        اسم_النقطة,Easting,Northing,Elevation<br>
+                        مثال:<br>
+                        STAD_POL_MD3,573407.918,3505539.067,814.481
+                    </div>
+                </div>
+
+                <div class="glass rounded-2xl p-6 shadow-xl border-2 border-orange-300">
+                    <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        إضافة نقطة UTM جديدة
+                    </h2>
+                    
+                    <div class="space-y-3">
+                        <input type="text" id="pointName" placeholder="اسم النقطة (مثال: STAD_POL_MD3)" class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:border-orange-500 outline-none">
+                        
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="text-xs text-gray-500 block mb-1">Easting (X) - متر</label>
+                                <input type="number" id="easting" placeholder="573407.918" step="0.001" class="utm-input w-full px-3 py-2 rounded-lg outline-none">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 block mb-1">Northing (Y) - متر</label>
+                                <input type="number" id="northing" placeholder="3505539.067" step="0.001" class="utm-input w-full px-3 py-2 rounded-lg outline-none">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="text-xs text-gray-500 block mb-1">Elevation (Z) - متر (اختياري)</label>
+                            <input type="number" id="elevation" placeholder="814.481" step="0.001" class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:border-orange-500 outline-none bg-gray-50">
+                        </div>
+
+                        <button onclick="submitPointForm()" class="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white py-3 rounded-lg hover:shadow-lg transition font-bold text-lg">
+                            + إضافة النقطة
+                        </button>
+                    </div>
+
+                    <div id="conversionPreview" class="hidden mt-4 coord-box p-3 rounded-lg">
+                        <p class="text-xs font-bold text-amber-800 mb-1">🔄 التحويل التلقائي:</p>
+                        <p class="text-xs text-amber-900 font-mono" id="previewCoords"></p>
+                    </div>
+                </div>
+
+                <div class="glass rounded-2xl p-6 shadow-xl">
+                    <h2 class="text-lg font-bold text-gray-800 mb-3">البحث في النقاط</h2>
+                    <input type="text" id="searchInput" placeholder="اكتب اسم النقطة..." 
+                           class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-purple-500 outline-none"
+                           oninput="searchPoints(this.value)">
+                    <div id="searchResults" class="mt-3 space-y-2 max-h-60 overflow-y-auto hidden"></div>
+                </div>
+
+                <div class="glass rounded-2xl p-6 shadow-xl">
+                    <div class="text-center">
+                        <p class="text-gray-500 text-sm">النقاط المحفوظة</p>
+                        <p class="text-4xl font-bold text-blue-600 mt-2" id="pointsCount">0</p>
+                        <p class="text-xs text-gray-400 mt-1">☁️ متزامن مع السحابة</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2">
+                <div class="glass rounded-2xl shadow-xl overflow-hidden h-full border-2 border-gray-200">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-6 glass rounded-2xl shadow-xl overflow-hidden">
+            <div class="p-4 bg-gradient-to-r from-blue-50 to-purple-50 border-b flex justify-between items-center">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-800">📋 قائمة النقاط UTM</h3>
+                    <p class="text-sm text-gray-500">جميع الإحداثيات متزامنة مع السحابة</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="exportToUTMFile()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-bold flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        تصدير UTM
+                    </button>
+                    <button id="clearAllBtn" onclick="clearAllPoints()" class="bg-red-100 text-red-600 px-4 py-2 rounded-lg hover:bg-red-200 text-sm font-bold hidden">
+                        تفريغ الكل
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">#</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">اسم النقطة</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">Easting (X)</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">Northing (Y)</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">Elevation (Z)</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">خط العرض</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">خط الطول</th>
+                            <th class="px-4 py-3 text-right text-xs font-bold text-gray-600">إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pointsTableBody" class="divide-y divide-gray-200 bg-white">
+                        <tr>
+                            <td colspan="8" class="px-6 py-8 text-center text-gray-400">جاري تحميل البيانات...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ═══════════════════════════════════════════════════════════════
+    // إعدادات JSONBin - بيانات الاتصال بالسحابة
+    // ═══════════════════════════════════════════════════════════════
+    const JSONBIN_CONFIG = {
+        BIN_ID: '699f6eb5d0ea881f40d98db6',
+        ACCESS_KEY: '$2a$10$55.YMftES5Cg4HoNHHCuKeKLSrTYemMHK0U.ccC4YjcJ1rSDcRUEW',
+        API_URL: 'https://api.jsonbin.io/v3/b'
+    };
+
+    // تعريف نظام UTM Zone 31N
+    proj4.defs("EPSG:32631", "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs");
+    const utmProjection = "EPSG:32631";
+    const wgs84Projection = "EPSG:4326";
+
+    // بيانات تسجيل الدخول
+    const ADMIN_USERNAME_HASH = "YWRlbA==";
+    const ADMIN_PASSWORD_HASH = "YWRlbA==";
+    const VIEWER_CREDENTIALS = { username: "0000", password: "0000" };
+
+    let currentUser = null;
+    let map;
+    let markers = [];
+    let points = [];
+    let isSyncing = false;
+
+    // ═══════════════════════════════════════════════════════════════
+    // دوال JSONBin - المزامنة مع السحابة
+    // ═══════════════════════════════════════════════════════════════
+
+    async function loadFromCloud() {
+        showSyncStatus('loading', 'جاري تحميل البيانات...');
+        try {
+            const response = await fetch(`${JSONBIN_CONFIG.API_URL}/${JSONBIN_CONFIG.BIN_ID}/latest`, {
+                method: 'GET',
+                headers: {
+                    'X-Access-Key': JSONBIN_CONFIG.ACCESS_KEY
+                }
+            });
+            
+            if (!response.ok) throw new Error('فشل في تحميل البيانات');
+            
+            const data = await response.json();
+            const cloudData = data.record;
+            
+            if (cloudData && cloudData.points) {
+                points = cloudData.points;
+                // إعادة حساب Lat/Lng للتأكد
+                points.forEach(p => {
+                    const latLng = utmToLatLng(p.easting, p.northing);
+                    if (latLng) {
+                        p.lat = latLng.lat;
+                        p.lng = latLng.lng;
+                    }
+                });
+                updateMapFromPoints();
+                updateUI();
+                showSyncStatus('success', 'تم التحديث من السحابة');
+            } else {
+                points = [];
+                updateUI();
+                showSyncStatus('success', 'لا توجد بيانات في السحابة');
+            }
+        } catch (error) {
+            console.error('Error loading from cloud:', error);
+            showSyncStatus('error', 'فشل التحميل من السحابة');
+            // محاولة تحميل من الذاكرة المحلية كاحتياطي
+            loadFromLocalBackup();
+        }
+    }
+
+    async function saveToCloud() {
+        if (isSyncing) return;
+        isSyncing = true;
+        showSyncStatus('loading', 'جاري حفظ البيانات...');
+        
+        try {
+            const dataToSave = {
+                points: points,
+                lastUpdated: new Date().toISOString(),
+                updatedBy: currentUser ? currentUser.username : 'unknown'
+            };
+            
+            const response = await fetch(`${JSONBIN_CONFIG.API_URL}/${JSONBIN_CONFIG.BIN_ID}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Access-Key': JSONBIN_CONFIG.ACCESS_KEY
+                },
+                body: JSON.stringify(dataToSave)
+            });
+            
+            if (!response.ok) throw new Error('فشل في حفظ البيانات');
+            
+            showSyncStatus('success', 'تم الحفظ في السحابة');
+            
+            // حفظ نسخة احتياطية محلية
+            localStorage.setItem('utmPoints_backup', JSON.stringify(points));
+        } catch (error) {
+            console.error('Error saving to cloud:', error);
+            showSyncStatus('error', 'فشل الحفظ في السحابة');
+            // حفظ محلي كاحتياطي
+            localStorage.setItem('utmPoints_backup', JSON.stringify(points));
+        } finally {
+            isSyncing = false;
+        }
+    }
+
+    function loadFromLocalBackup() {
+        const saved = localStorage.getItem('utmPoints_backup');
+        if (saved) {
+            try {
+                const savedPoints = JSON.parse(saved);
+                savedPoints.forEach(p => {
+                    const latLng = utmToLatLng(p.easting, p.northing);
+                    if (latLng) {
+                        p.lat = latLng.lat;
+                        p.lng = latLng.lng;
+                        points.push(p);
+                    }
+                });
+                updateMapFromPoints();
+                updateUI();
+            } catch(e) {
+                console.error(e);
+            }
+        }
+    }
+
+    function updateMapFromPoints() {
+        // مسح العلامات القديمة
+        markers.forEach(m => map.removeLayer(m.marker));
+        markers = [];
+        
+        // إضافة العلامات الجديدة
+        points.forEach(p => {
+            const marker = L.marker([p.lat, p.lng])
+                .addTo(map)
+                .bindPopup(`
+                    <div class="text-center">
+                        <b class="text-lg">${p.name}</b><br>
+                        <hr class="my-2">
+                        <span class="text-blue-600 font-bold">UTM Zone 31N</span><br>
+                        X: ${p.easting.toFixed(3)} m<br>
+                        Y: ${p.northing.toFixed(3)} m<br>
+                        Z: ${p.elevation.toFixed(3)} m<br>
+                        <hr class="my-2">
+                        <span class="text-gray-500 text-xs">
+                            Lat: ${p.lat.toFixed(6)}<br>
+                            Lng: ${p.lng.toFixed(6)}
+                        </span>
+                    </div>
+                `);
+            markers.push({point: p, marker: marker});
+        });
+        
+        if (points.length > 0) {
+            updateMapBounds();
+        }
+    }
+
+    function showSyncStatus(status, message) {
+        const indicator = document.getElementById('syncIndicator');
+        const text = document.getElementById('syncText');
+        
+        indicator.classList.remove('hidden', 'sync-success', 'sync-loading', 'sync-error');
+        indicator.classList.add(`sync-${status}`);
+        text.textContent = message;
+        
+        if (status === 'success') {
+            setTimeout(() => {
+                indicator.classList.add('hidden');
+            }, 3000);
+        }
+    }
+
+    async function syncData() {
+        await loadFromCloud();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // نظام تسجيل الدخول
+    // ═══════════════════════════════════════════════════════════════
+
+    function verifyAdmin(username, password) {
+        try {
+            const inputUserHash = btoa(username);
+            const inputPassHash = btoa(password);
+            return inputUserHash === ADMIN_USERNAME_HASH && inputPassHash === ADMIN_PASSWORD_HASH;
+        } catch(e) {
+            return false;
+        }
+    }
+
+    function checkAuth() {
+        const saved = sessionStorage.getItem('utmUser');
+        if (saved) {
+            currentUser = JSON.parse(saved);
+            showMainContent();
+        } else {
+            showLoginPage();
+        }
+    }
+
+    function showLoginPage() {
+        document.getElementById('loginPage').classList.remove('hidden');
+        document.getElementById('mainContent').classList.add('hidden');
+    }
+
+    async function showMainContent() {
+        document.getElementById('loginPage').classList.add('hidden');
+        document.getElementById('mainContent').classList.remove('hidden');
+        updateUIBasedOnRole();
+        if (!map) {
+            initMap();
+        } else {
+            await loadFromCloud();
+        }
+    }
+
+    function handleLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+
+        if (verifyAdmin(username, password)) {
+            currentUser = { username: username, role: 'admin', name: 'الأدمن' };
+            sessionStorage.setItem('utmUser', JSON.stringify(currentUser));
+            showMainContent();
+            showNotification('مرحباً أيها الأدمن!', 'success');
+            return;
+        }
+
+        if (username === VIEWER_CREDENTIALS.username && password === VIEWER_CREDENTIALS.password) {
+            currentUser = { username: username, role: 'viewer', name: 'زائر' };
+            sessionStorage.setItem('utmUser', JSON.stringify(currentUser));
+            showMainContent();
+            showNotification('مرحباً زائرنا الكريم!', 'success');
+            return;
+        }
+
+        showNotification('اسم المستخدم أو كلمة المرور غير صحيحة', 'error');
+    }
+
+    function logout() {
+        sessionStorage.removeItem('utmUser');
+        currentUser = null;
+        location.reload();
+    }
+
+    function updateUIBasedOnRole() {
+        const badge = document.getElementById('roleBadge');
+        const userDisplay = document.getElementById('userDisplay');
+        
+        userDisplay.textContent = `${currentUser.name}`;
+        
+        if (currentUser.role === 'admin') {
+            badge.className = 'role-badge admin-badge';
+            badge.textContent = '🔴 وضع الأدمن';
+            document.getElementById('uploadSection').classList.remove('hidden');
+            document.getElementById('clearAllBtn').classList.remove('hidden');
+        } else {
+            badge.className = 'role-badge viewer-badge';
+            badge.textContent = '🟢 وضع الزائر';
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('clearAllBtn').classList.add('hidden');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // الخريطة والإحداثيات
+    // ═══════════════════════════════════════════════════════════════
+
+    function initMap() {
+        map = L.map('map').setView([36.7, 3.0], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        // تحميل البيانات من السحابة بعد تهيئة الخريطة
+        loadFromCloud();
+    }
+
+    function utmToLatLng(easting, northing) {
+        try {
+            const result = proj4(utmProjection, wgs84Projection, [easting, northing]);
+            return { lat: result[1], lng: result[0] };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // إضافة النقاط
+    // ═══════════════════════════════════════════════════════════════
+
+    function addUTMPoint(name, easting, northing, elevation = 0, save = true) {
+        if (!easting || !northing || isNaN(easting) || isNaN(northing)) {
+            showNotification('إحداثيات UTM غير صالحة', 'error');
+            return null;
+        }
+
+        const latLng = utmToLatLng(parseFloat(easting), parseFloat(northing));
+        if (!latLng) {
+            showNotification('خطأ في تحويل الإحداثيات - تأكد من Zone 31N', 'error');
+            return null;
+        }
+
+        const point = {
+            id: Date.now() + Math.random(),
+            name: name || `نقطة_${points.length + 1}`,
+            easting: parseFloat(easting),
+            northing: parseFloat(northing),
+            elevation: parseFloat(elevation) || 0,
+            lat: latLng.lat,
+            lng: latLng.lng,
+            zone: "31N",
+            addedBy: currentUser ? currentUser.username : 'unknown',
+            addedAt: new Date().toISOString()
+        };
+
+        points.push(point);
+
+        const marker = L.marker([latLng.lat, latLng.lng])
+            .addTo(map)
+            .bindPopup(`
+                <div class="text-center">
+                    <b class="text-lg">${point.name}</b><br>
+                    <hr class="my-2">
+                    <span class="text-blue-600 font-bold">UTM Zone 31N</span><br>
+                    X: ${point.easting.toFixed(3)} m<br>
+                    Y: ${point.northing.toFixed(3)} m<br>
+                    Z: ${point.elevation.toFixed(3)} m<br>
+                    <hr class="my-2">
+                    <span class="text-gray-500 text-xs">
+                        Lat: ${latLng.lat.toFixed(6)}<br>
+                        Lng: ${latLng.lng.toFixed(6)}
+                    </span>
+                </div>
+            `);
+        
+        markers.push({point: point, marker: marker});
+        
+        if (save) {
+            updateUI();
+            saveToCloud(); // حفظ في السحابة بدلاً من localStorage
+            showNotification(`تمت إضافة ${point.name} بنجاح!`, 'success');
+        }
+        
+        return point;
+    }
+
+    function submitPointForm() {
+        const name = document.getElementById('pointName').value.trim();
+        const easting = document.getElementById('easting').value;
+        const northing = document.getElementById('northing').value;
+        const elevation = document.getElementById('elevation').value;
+
+        if (!name || !easting || !northing) {
+            showNotification('أدخل الاسم وإحداثيات X و Y', 'error');
+            return;
+        }
+
+        const point = addUTMPoint(name, easting, northing, elevation);
+        
+        if (point) {
+            document.getElementById('pointName').value = '';
+            document.getElementById('easting').value = '';
+            document.getElementById('northing').value = '';
+            document.getElementById('elevation').value = '';
+            document.getElementById('conversionPreview').classList.add('hidden');
+            updateMapBounds();
+        }
+    }
+
+    document.getElementById('easting')?.addEventListener('input', updatePreview);
+    document.getElementById('northing')?.addEventListener('input', updatePreview);
+
+    function updatePreview() {
+        const easting = document.getElementById('easting').value;
+        const northing = document.getElementById('northing').value;
+        
+        if (easting && northing && !isNaN(easting) && !isNaN(northing)) {
+            const latLng = utmToLatLng(parseFloat(easting), parseFloat(northing));
+            if (latLng) {
+                document.getElementById('conversionPreview').classList.remove('hidden');
+                document.getElementById('previewCoords').innerHTML = 
+                    `Lat: ${latLng.lat.toFixed(6)}<br>Lng: ${latLng.lng.toFixed(6)}`;
+            }
+        } else {
+            document.getElementById('conversionPreview').classList.add('hidden');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // رفع الملفات
+    // ═══════════════════════════════════════════════════════════════
+
+    function handleUTMFileUpload(event) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('غير مصرح لك برفع الملفات', 'error');
+            return;
+        }
+
+        const file = event.target.files[0];
+        if (!file) return;
+
+        if (points.length > 0 && !confirm('سيتم استبدال النقاط الحالية؟')) return;
+
+        clearAllPoints(false);
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            parseUTMFile(e.target.result, file.name);
+        };
+        reader.readAsText(file);
+    }
+
+    async function parseUTMFile(content, filename) {
+        const lines = content.split('\n');
+        let addedCount = 0;
+
+        lines.forEach(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) return;
+
+            const parts = line.split(/[,\t;]+/).map(p => p.trim());
+            
+            if (parts.length >= 3) {
+                const name = parts[0];
+                const easting = parseFloat(parts[1]);
+                const northing = parseFloat(parts[2]);
+                const elevation = parts[3] ? parseFloat(parts[3]) : 0;
+
+                if (!isNaN(easting) && !isNaN(northing)) {
+                    addUTMPoint(name, easting, northing, elevation, false);
+                    addedCount++;
+                }
+            }
+        });
+
+        if (addedCount > 0) {
+            updateUI();
+            await saveToCloud(); // حفظ في السحابة
+            updateMapBounds();
+            showNotification(`تم تحميل ${addedCount} نقطة من ${filename}`, 'success');
+        } else {
+            showNotification('لم يتم العثور على نقاط صالحة', 'error');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // تحديث الواجهة
+    // ═══════════════════════════════════════════════════════════════
+
+    function updateUI() {
+        document.getElementById('pointsCount').textContent = points.length;
+        
+        const tbody = document.getElementById('pointsTableBody');
+        if (points.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-400">لا توجد نقاط. أضف نقطة UTM جديدة</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = points.map((p, i) => {
+            let deleteButton = '';
+            if (currentUser && currentUser.role === 'admin') {
+                deleteButton = `<button onclick="deletePoint(${p.id})" class="text-red-600 hover:text-red-800 font-bold mr-2">حذف</button>`;
+            }
+            
+            return `
+            <tr class="hover:bg-gray-50 transition" id="row-${p.id}">
+                <td class="px-4 py-3 text-sm text-gray-500">${i + 1}</td>
+                <td class="px-4 py-3 font-bold text-gray-800">${p.name}</td>
+                <td class="px-4 py-3 text-sm font-mono font-bold text-blue-600">${p.easting.toFixed(3)}</td>
+                <td class="px-4 py-3 text-sm font-mono font-bold text-blue-600">${p.northing.toFixed(3)}</td>
+                <td class="px-4 py-3 text-sm font-mono text-gray-600">${p.elevation.toFixed(3)} m</td>
+                <td class="px-4 py-3 text-sm font-mono text-gray-500">${p.lat.toFixed(6)}</td>
+                <td class="px-4 py-3 text-sm font-mono text-gray-500">${p.lng.toFixed(6)}</td>
+                <td class="px-4 py-3">
+                    <button onclick="focusOnPoint(${p.id})" class="text-blue-600 hover:text-blue-800 font-bold ml-2">عرض</button>
+                    ${deleteButton}
+                </td>
+            </tr>
+        `}).join('');
+    }
+
+    function searchPoints(query) {
+        const results = document.getElementById('searchResults');
+        if (!query.trim()) {
+            results.classList.add('hidden');
+            return;
+        }
+
+        const filtered = points.filter(p => p.name.toLowerCase().includes(query.toLowerCase()));
+        
+        if (filtered.length === 0) {
+            results.innerHTML = '<div class="text-gray-400 text-center py-2">لا توجد نتائج</div>';
+        } else {
+            results.innerHTML = filtered.map(p => `
+                <div class="p-3 bg-white rounded border hover:bg-blue-50 cursor-pointer" onclick="focusOnPoint(${p.id})">
+                    <div class="font-bold">${p.name}</div>
+                    <div class="text-xs text-gray-500">X: ${p.easting.toFixed(1)}, Y: ${p.northing.toFixed(1)}</div>
+                </div>
+            `).join('');
+        }
+        results.classList.remove('hidden');
+    }
+
+    function focusOnPoint(id) {
+        const p = points.find(x => x.id === id);
+        if (p) {
+            map.setView([p.lat, p.lng], 16);
+            const m = markers.find(x => x.point.id === id);
+            if (m) m.marker.openPopup();
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('bg-yellow-100'));
+            document.getElementById(`row-${id}`)?.classList.add('bg-yellow-100');
+        }
+    }
+
+    async function deletePoint(id) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('غير مصرح لك بالحذف', 'error');
+            return;
+        }
+
+        const idx = points.findIndex(p => p.id === id);
+        if (idx > -1) {
+            points.splice(idx, 1);
+            map.removeLayer(markers[idx].marker);
+            markers.splice(idx, 1);
+            updateUI();
+            await saveToCloud(); // حفظ في السحابة
+            showNotification('تم الحذف', 'success');
+        }
+    }
+
+    async function clearAllPoints(notify = true) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('غير مصرح لك بتفريغ البيانات', 'error');
+            return;
+        }
+
+        points = [];
+        markers.forEach(m => map.removeLayer(m.marker));
+        markers = [];
+        updateUI();
+        await saveToCloud(); // حفظ في السحابة
+        if (notify) showNotification('تم تفريغ الذاكرة', 'success');
+    }
+
+    function updateMapBounds() {
+        if (points.length === 0) return;
+        if (points.length === 1) {
+            map.setView([points[0].lat, points[0].lng], 15);
+            return;
+        }
+        const group = new L.featureGroup(markers.map(m => m.marker));
+        map.fitBounds(group.getBounds().pad(0.1));
+    }
+
+    function exportToUTMFile() {
+        if (points.length === 0) return;
+        
+        let content = "# UTM Zone 31N - الجزائر\n";
+        content += "# اسم_النقطة,Easting,Northing,Elevation\n";
+        
+        points.forEach(p => {
+            content += `${p.name},${p.easting.toFixed(3)},${p.northing.toFixed(3)},${p.elevation.toFixed(3)}\n`;
+        });
+
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `UTM_Zone31N_Points_${Date.now()}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        showNotification('تم تصدير ملف UTM', 'success');
+    }
+
+    function showNotification(msg, type) {
+        const div = document.createElement('div');
+        div.className = `fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg text-white font-bold z-50 fade-in ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
+        div.textContent = msg;
+        document.body.appendChild(div);
+        setTimeout(() => div.remove(), 3000);
+    }
+
+    window.onload = checkAuth;
+</script>
+
+</body>
+</html>
