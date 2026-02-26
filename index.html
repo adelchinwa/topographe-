@@ -29,6 +29,8 @@
         .sync-success { background: #d1fae5; color: #065f46; }
         .sync-loading { background: #fef3c7; color: #92400e; }
         .sync-error { background: #fee2e2; color: #991b1b; }
+        .point-row:hover { background-color: #fef3c7; }
+        .point-row.selected { background-color: #dbeafe; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -390,27 +392,33 @@
         points.forEach(p => {
             const marker = L.marker([p.lat, p.lng])
                 .addTo(map)
-                .bindPopup(`
-                    <div class="text-center">
-                        <b class="text-lg">${p.name}</b><br>
-                        <hr class="my-2">
-                        <span class="text-blue-600 font-bold">UTM Zone 31N</span><br>
-                        X: ${p.easting.toFixed(3)} m<br>
-                        Y: ${p.northing.toFixed(3)} m<br>
-                        Z: ${p.elevation.toFixed(3)} m<br>
-                        <hr class="my-2">
-                        <span class="text-gray-500 text-xs">
-                            Lat: ${p.lat.toFixed(6)}<br>
-                            Lng: ${p.lng.toFixed(6)}
-                        </span>
-                    </div>
-                `);
+                .bindPopup(createPopupContent(p));
             markers.push({point: p, marker: marker});
         });
         
         if (points.length > 0) {
             updateMapBounds();
         }
+    }
+
+    function createPopupContent(point) {
+        return `
+            <div class="text-center" style="min-width: 200px;">
+                <b class="text-lg" style="color: #dc2626; font-size: 16px;">${point.name}</b><br>
+                <hr style="margin: 8px 0; border-color: #e5e7eb;">
+                <span style="color: #2563eb; font-weight: bold; display: block; margin-bottom: 5px;">UTM Zone 31N</span>
+                <div style="font-family: monospace; font-size: 13px; line-height: 1.6;">
+                    <span style="color: #059669;">X:</span> ${point.easting.toFixed(3)} m<br>
+                    <span style="color: #059669;">Y:</span> ${point.northing.toFixed(3)} m<br>
+                    <span style="color: #7c3aed;">Z:</span> ${point.elevation.toFixed(3)} m
+                </div>
+                <hr style="margin: 8px 0; border-color: #e5e7eb;">
+                <span style="color: #6b7280; font-size: 11px;">
+                    Lat: ${point.lat.toFixed(6)}<br>
+                    Lng: ${point.lng.toFixed(6)}
+                </span>
+            </div>
+        `;
     }
 
     function showSyncStatus(status, message) {
@@ -539,6 +547,7 @@
             const result = proj4(utmProjection, wgs84Projection, [easting, northing]);
             return { lat: result[1], lng: result[0] };
         } catch (e) {
+            console.error('UTM Conversion Error:', e);
             return null;
         }
     }
@@ -553,18 +562,48 @@
             return null;
         }
 
-        const latLng = utmToLatLng(parseFloat(easting), parseFloat(northing));
+        const eastingNum = parseFloat(easting);
+        const northingNum = parseFloat(northing);
+        const elevationNum = parseFloat(elevation) || 0;
+
+        const latLng = utmToLatLng(eastingNum, northingNum);
         if (!latLng) {
             showNotification('خطأ في تحويل الإحداثيات - تأكد من Zone 31N', 'error');
             return null;
         }
 
+        // التأكد من عدم وجود نقطة بنفس الاسم
+        const existingIndex = points.findIndex(p => p.name === name);
+        if (existingIndex !== -1) {
+            // تحديث النقطة الموجودة
+            points[existingIndex].easting = eastingNum;
+            points[existingIndex].northing = northingNum;
+            points[existingIndex].elevation = elevationNum;
+            points[existingIndex].lat = latLng.lat;
+            points[existingIndex].lng = latLng.lng;
+            points[existingIndex].updatedAt = new Date().toISOString();
+            
+            // تحديث العلامة على الخريطة
+            if (markers[existingIndex]) {
+                markers[existingIndex].marker.setLatLng([latLng.lat, latLng.lng]);
+                markers[existingIndex].marker.setPopupContent(createPopupContent(points[existingIndex]));
+                markers[existingIndex].point = points[existingIndex];
+            }
+            
+            if (save) {
+                updateUI();
+                saveToCloud();
+                showNotification(`تم تحديث ${name} بنجاح!`, 'success');
+            }
+            return points[existingIndex];
+        }
+
         const point = {
-            id: Date.now() + Math.random(),
+            id: Date.now() + Math.random().toString(36).substr(2, 9),
             name: name || `نقطة_${points.length + 1}`,
-            easting: parseFloat(easting),
-            northing: parseFloat(northing),
-            elevation: parseFloat(elevation) || 0,
+            easting: eastingNum,
+            northing: northingNum,
+            elevation: elevationNum,
             lat: latLng.lat,
             lng: latLng.lng,
             zone: "31N",
@@ -576,27 +615,13 @@
 
         const marker = L.marker([latLng.lat, latLng.lng])
             .addTo(map)
-            .bindPopup(`
-                <div class="text-center">
-                    <b class="text-lg">${point.name}</b><br>
-                    <hr class="my-2">
-                    <span class="text-blue-600 font-bold">UTM Zone 31N</span><br>
-                    X: ${point.easting.toFixed(3)} m<br>
-                    Y: ${point.northing.toFixed(3)} m<br>
-                    Z: ${point.elevation.toFixed(3)} m<br>
-                    <hr class="my-2">
-                    <span class="text-gray-500 text-xs">
-                        Lat: ${latLng.lat.toFixed(6)}<br>
-                        Lng: ${latLng.lng.toFixed(6)}
-                    </span>
-                </div>
-            `);
+            .bindPopup(createPopupContent(point));
         
         markers.push({point: point, marker: marker});
         
         if (save) {
             updateUI();
-            saveToCloud(); // حفظ في السحابة بدلاً من localStorage
+            saveToCloud();
             showNotification(`تمت إضافة ${point.name} بنجاح!`, 'success');
         }
         
@@ -646,10 +671,10 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // رفع الملفات
+    // رفع الملفات - تم إصلاحه
     // ═══════════════════════════════════════════════════════════════
 
-    function handleUTMFileUpload(event) {
+    async function handleUTMFileUpload(event) {
         if (!currentUser || currentUser.role !== 'admin') {
             showNotification('غير مصرح لك برفع الملفات', 'error');
             return;
@@ -658,26 +683,34 @@
         const file = event.target.files[0];
         if (!file) return;
 
-        if (points.length > 0 && !confirm('سيتم استبدال النقاط الحالية؟')) return;
+        const shouldAppend = confirm('هل تريد إضافة النقاط للقائمة الحالية؟\n(اضغط "موافق" للإضافة، "إلغاء" لاستبدال الكل)');
 
-        clearAllPoints(false);
+        if (!shouldAppend) {
+            await clearAllPoints(false);
+        }
 
         const reader = new FileReader();
-        reader.onload = function(e) {
-            parseUTMFile(e.target.result, file.name);
+        reader.onload = async function(e) {
+            await parseUTMFile(e.target.result, file.name);
         };
         reader.readAsText(file);
+        
+        // إعادة تعيين input file للسماح برفع نفس الملف مرة أخرى
+        event.target.value = '';
     }
 
     async function parseUTMFile(content, filename) {
         const lines = content.split('\n');
         let addedCount = 0;
+        let errorCount = 0;
+        const newPoints = [];
 
-        lines.forEach(line => {
+        lines.forEach((line, index) => {
             line = line.trim();
-            if (!line || line.startsWith('#')) return;
+            if (!line || line.startsWith('#') || line.startsWith('//')) return;
 
-            const parts = line.split(/[,\t;]+/).map(p => p.trim());
+            // دعم الفواصل المتعددة: comma, tab, semicolon
+            const parts = line.split(/[,\t;]+/).map(p => p.trim()).filter(p => p);
             
             if (parts.length >= 3) {
                 const name = parts[0];
@@ -686,19 +719,30 @@
                 const elevation = parts[3] ? parseFloat(parts[3]) : 0;
 
                 if (!isNaN(easting) && !isNaN(northing)) {
-                    addUTMPoint(name, easting, northing, elevation, false);
-                    addedCount++;
+                    // التحقق من صحة النطاق للجزائر (تقريباً)
+                    if (easting > 100000 && easting < 900000 && northing > 3000000 && northing < 4500000) {
+                        const point = addUTMPoint(name, easting, northing, elevation, false);
+                        if (point) {
+                            newPoints.push(point);
+                            addedCount++;
+                        }
+                    } else {
+                        console.warn(`النقطة ${name} خارج نطاق Zone 31N للجزائر`);
+                        errorCount++;
+                    }
+                } else {
+                    errorCount++;
                 }
             }
         });
 
         if (addedCount > 0) {
             updateUI();
-            await saveToCloud(); // حفظ في السحابة
+            await saveToCloud();
             updateMapBounds();
-            showNotification(`تم تحميل ${addedCount} نقطة من ${filename}`, 'success');
+            showNotification(`تم تحميل ${addedCount} نقطة من ${filename}${errorCount > 0 ? ` (${errorCount} خطأ)` : ''}`, 'success');
         } else {
-            showNotification('لم يتم العثور على نقاط صالحة', 'error');
+            showNotification('لم يتم العثور على نقاط صالحة في الملف', 'error');
         }
     }
 
@@ -718,20 +762,20 @@
         tbody.innerHTML = points.map((p, i) => {
             let deleteButton = '';
             if (currentUser && currentUser.role === 'admin') {
-                deleteButton = `<button onclick="deletePoint(${p.id})" class="text-red-600 hover:text-red-800 font-bold mr-2">حذف</button>`;
+                deleteButton = `<button onclick="deletePoint('${p.id}')" class="text-red-600 hover:text-red-800 font-bold mr-2 px-2 py-1 rounded hover:bg-red-50 transition" title="حذف هذه النقطة">🗑️ حذف</button>`;
             }
             
             return `
-            <tr class="hover:bg-gray-50 transition" id="row-${p.id}">
-                <td class="px-4 py-3 text-sm text-gray-500">${i + 1}</td>
-                <td class="px-4 py-3 font-bold text-gray-800">${p.name}</td>
+            <tr class="point-row hover:bg-gray-50 transition border-b border-gray-100" id="row-${p.id}">
+                <td class="px-4 py-3 text-sm text-gray-500 font-bold">${i + 1}</td>
+                <td class="px-4 py-3 font-bold text-gray-800 text-sm">${p.name}</td>
                 <td class="px-4 py-3 text-sm font-mono font-bold text-blue-600">${p.easting.toFixed(3)}</td>
                 <td class="px-4 py-3 text-sm font-mono font-bold text-blue-600">${p.northing.toFixed(3)}</td>
                 <td class="px-4 py-3 text-sm font-mono text-gray-600">${p.elevation.toFixed(3)} m</td>
                 <td class="px-4 py-3 text-sm font-mono text-gray-500">${p.lat.toFixed(6)}</td>
                 <td class="px-4 py-3 text-sm font-mono text-gray-500">${p.lng.toFixed(6)}</td>
                 <td class="px-4 py-3">
-                    <button onclick="focusOnPoint(${p.id})" class="text-blue-600 hover:text-blue-800 font-bold ml-2">عرض</button>
+                    <button onclick="focusOnPoint('${p.id}')" class="text-blue-600 hover:text-blue-800 font-bold ml-2 px-2 py-1 rounded hover:bg-blue-50 transition" title="عرض على الخريطة">👁️ عرض</button>
                     ${deleteButton}
                 </td>
             </tr>
@@ -751,8 +795,8 @@
             results.innerHTML = '<div class="text-gray-400 text-center py-2">لا توجد نتائج</div>';
         } else {
             results.innerHTML = filtered.map(p => `
-                <div class="p-3 bg-white rounded border hover:bg-blue-50 cursor-pointer" onclick="focusOnPoint(${p.id})">
-                    <div class="font-bold">${p.name}</div>
+                <div class="p-3 bg-white rounded border hover:bg-blue-50 cursor-pointer transition" onclick="focusOnPoint('${p.id}')">
+                    <div class="font-bold text-sm">${p.name}</div>
                     <div class="text-xs text-gray-500">X: ${p.easting.toFixed(1)}, Y: ${p.northing.toFixed(1)}</div>
                 </div>
             `).join('');
@@ -763,13 +807,26 @@
     function focusOnPoint(id) {
         const p = points.find(x => x.id === id);
         if (p) {
-            map.setView([p.lat, p.lng], 16);
+            map.setView([p.lat, p.lng], 18);
             const m = markers.find(x => x.point.id === id);
-            if (m) m.marker.openPopup();
-            document.querySelectorAll('tr').forEach(r => r.classList.remove('bg-yellow-100'));
-            document.getElementById(`row-${id}`)?.classList.add('bg-yellow-100');
+            if (m) {
+                m.marker.openPopup();
+            }
+            
+            // إزالة التحديد السابق
+            document.querySelectorAll('.point-row').forEach(r => r.classList.remove('selected'));
+            // إضافة تحديد للصف الحالي
+            const row = document.getElementById(`row-${id}`);
+            if (row) {
+                row.classList.add('selected');
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // حذف نقطة محددة - تم إصلاحه بالكامل
+    // ═══════════════════════════════════════════════════════════════
 
     async function deletePoint(id) {
         if (!currentUser || currentUser.role !== 'admin') {
@@ -777,15 +834,31 @@
             return;
         }
 
-        const idx = points.findIndex(p => p.id === id);
-        if (idx > -1) {
-            points.splice(idx, 1);
-            map.removeLayer(markers[idx].marker);
-            markers.splice(idx, 1);
-            updateUI();
-            await saveToCloud(); // حفظ في السحابة
-            showNotification('تم الحذف', 'success');
+        const pointIndex = points.findIndex(p => p.id === id);
+        if (pointIndex === -1) {
+            showNotification('النقطة غير موجودة', 'error');
+            return;
         }
+
+        const pointName = points[pointIndex].name;
+        
+        if (!confirm(`هل أنت متأكد من حذف النقطة "${pointName}"؟`)) {
+            return;
+        }
+
+        // حذف من المصفوفات
+        points.splice(pointIndex, 1);
+        
+        // حذف العلامة من الخريطة
+        if (markers[pointIndex]) {
+            map.removeLayer(markers[pointIndex].marker);
+            markers.splice(pointIndex, 1);
+        }
+
+        // تحديث الواجهة والحفظ
+        updateUI();
+        await saveToCloud();
+        showNotification(`تم حذف النقطة "${pointName}" بنجاح`, 'success');
     }
 
     async function clearAllPoints(notify = true) {
@@ -794,18 +867,26 @@
             return;
         }
 
-        points = [];
+        if (notify && !confirm('هل أنت متأكد من حذف جميع النقاط؟')) {
+            return;
+        }
+
+        // مسح جميع العلامات من الخريطة
         markers.forEach(m => map.removeLayer(m.marker));
+        
+        // مسح المصفوفات
+        points = [];
         markers = [];
+        
         updateUI();
-        await saveToCloud(); // حفظ في السحابة
-        if (notify) showNotification('تم تفريغ الذاكرة', 'success');
+        await saveToCloud();
+        if (notify) showNotification('تم تفريغ جميع النقاط', 'success');
     }
 
     function updateMapBounds() {
         if (points.length === 0) return;
         if (points.length === 1) {
-            map.setView([points[0].lat, points[0].lng], 15);
+            map.setView([points[0].lat, points[0].lng], 16);
             return;
         }
         const group = new L.featureGroup(markers.map(m => m.marker));
@@ -813,9 +894,13 @@
     }
 
     function exportToUTMFile() {
-        if (points.length === 0) return;
+        if (points.length === 0) {
+            showNotification('لا توجد نقاط للتصدير', 'error');
+            return;
+        }
         
         let content = "# UTM Zone 31N - الجزائر\n";
+        content += "# تم التصدير في: " + new Date().toLocaleString('ar-DZ') + "\n";
         content += "# اسم_النقطة,Easting,Northing,Elevation\n";
         
         points.forEach(p => {
@@ -826,19 +911,29 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `UTM_Zone31N_Points_${Date.now()}.txt`;
+        a.download = `UTM_Zone31N_Points_${new Date().getTime()}.txt`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        showNotification('تم تصدير ملف UTM', 'success');
+        showNotification('تم تصدير ملف UTM بنجاح', 'success');
     }
 
     function showNotification(msg, type) {
+        // إزالة الإشعارات السابقة
+        const existing = document.querySelectorAll('.notification-toast');
+        existing.forEach(e => e.remove());
+        
         const div = document.createElement('div');
-        div.className = `fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg text-white font-bold z-50 fade-in ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
+        div.className = `notification-toast fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg text-white font-bold z-50 fade-in ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
         div.textContent = msg;
         document.body.appendChild(div);
-        setTimeout(() => div.remove(), 3000);
+        setTimeout(() => {
+            div.style.opacity = '0';
+            div.style.transition = 'opacity 0.5s';
+            setTimeout(() => div.remove(), 500);
+        }, 3000);
     }
 
     window.onload = checkAuth;
