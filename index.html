@@ -348,6 +348,23 @@
             box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
         }
 
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
+        }
+
         .input-group {
             position: relative;
         }
@@ -413,6 +430,56 @@
 
         [data-theme="dark"] .measure-result-card {
             background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+        }
+
+        .export-menu {
+            position: relative;
+            display: inline-block;
+        }
+
+        .export-menu-content {
+            display: none;
+            position: absolute;
+            background: white;
+            min-width: 160px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            z-index: 1000;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .export-menu-content.show {
+            display: block;
+        }
+
+        .export-menu-content button {
+            width: 100%;
+            padding: 12px 16px;
+            text-align: right;
+            border: none;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+
+        .export-menu-content button:hover {
+            background: #f3f4f6;
+            color: #3b82f6;
+        }
+
+        [data-theme="dark"] .export-menu-content {
+            background: #1e293b;
+        }
+
+        [data-theme="dark"] .export-menu-content button {
+            background: #1e293b;
+            color: white;
+        }
+
+        [data-theme="dark"] .export-menu-content button:hover {
+            background: #334155;
         }
     </style>
 </head>
@@ -486,6 +553,20 @@
                             <span class="text-xl">🔄</span>
                             <span class="hidden sm:inline">مزامنة</span>
                         </button>
+                        
+                        <!-- Export Button -->
+                        <div class="export-menu">
+                            <button onclick="toggleExportMenu()" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl transition flex items-center gap-2 backdrop-blur-sm">
+                                <span class="text-xl">💾</span>
+                                <span class="hidden sm:inline">تصدير</span>
+                            </button>
+                            <div id="exportMenu" class="export-menu-content">
+                                <button onclick="exportToTXT()">📄 تصدير TXT</button>
+                                <button onclick="exportToCSV()">📊 تصدير CSV</button>
+                                <button onclick="exportToXYZ()">📐 تصدير XYZ</button>
+                            </div>
+                        </div>
+
                         <div class="bg-white/20 px-4 py-2 rounded-xl backdrop-blur-sm text-sm">
                             <span id="userDisplay"></span>
                         </div>
@@ -564,10 +645,10 @@
                         </div>
 
                         <div class="border-2 border-dashed border-green-300 rounded-xl p-6 text-center hover:bg-green-50 transition cursor-pointer" onclick="document.getElementById('fileInput').click()">
-                            <input type="file" id="fileInput" accept=".ncn,.xyz,.txt,.csv" class="hidden" onchange="handleFileUpload(event)">
+                            <input type="file" id="fileInput" accept=".ncn,.xyz,.txt,.csv,.TXT,.CSV,.NCN,.XYZ" class="hidden" onchange="handleFileUpload(event)">
                             <div class="text-4xl mb-2">📂</div>
                             <p class="font-semibold text-green-700">اضغط لرفع الملف</p>
-                            <p class="text-xs text-green-500 mt-1">يدعم NCN, XYZ, TXT, CSV</p>
+                            <p class="text-xs text-green-500 mt-1">يدعم جميع الصيغ: NCN, XYZ, TXT, CSV</p>
                         </div>
 
                         <div id="uploadProgress" class="hidden mt-4">
@@ -578,11 +659,11 @@
                         </div>
 
                         <div class="mt-4 text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
-                            <p class="font-bold mb-2">صيغ الملفات المدعومة:</p>
+                            <p class="font-bold mb-2">الصيغ المدعومة:</p>
                             <ul class="space-y-1 list-disc list-inside">
                                 <li><strong>NCN:</strong> اسم، X، Y، Z (مفصول بمسافات)</li>
                                 <li><strong>XYZ:</strong> X، Y، Z (سطر لكل نقطة)</li>
-                                <li><strong>TXT/CSV:</strong> اسم، X، Y، Z (مفصول بفواصل)</li>
+                                <li><strong>TXT/CSV:</strong> أي صيغة (تلقائي)</li>
                             </ul>
                         </div>
                     </div>
@@ -987,7 +1068,7 @@
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // FILE UPLOAD HANDLING (NCN, XYZ, TXT, CSV)
+        // FILE UPLOAD HANDLING - FIXED VERSION
         // ═══════════════════════════════════════════════════════════════
 
         async function handleFileUpload(event) {
@@ -1017,7 +1098,8 @@
                         break;
                     case 'txt':
                     case 'csv':
-                        points = parseCSV(text);
+                        // Try all parsers for TXT/CSV files
+                        points = parseTXTUniversal(text);
                         break;
                 }
                 
@@ -1066,15 +1148,14 @@
 
         function parseNCN(content) {
             const points = [];
-            const lines = content.split('\\n');
+            const lines = content.split('\n');
             
             for (const line of lines) {
                 const trimmed = line.trim();
-                if (!trimmed || trimmed.startsWith('#')) continue;
+                if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
                 
                 // NCN format: Name X Y Z (space separated)
-                // Example: STAD_POL 573314.142 3505675.230 815.144
-                const parts = trimmed.split(/\\s+/);
+                const parts = trimmed.split(/\s+/);
                 
                 if (parts.length >= 3) {
                     const name = parts[0];
@@ -1093,16 +1174,15 @@
 
         function parseXYZ(content) {
             const points = [];
-            const lines = content.split('\\n');
+            const lines = content.split('\n');
             let pointIndex = 1;
             
             for (const line of lines) {
                 const trimmed = line.trim();
-                if (!trimmed || trimmed.startsWith('#')) continue;
+                if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
                 
                 // XYZ format: X Y Z (space or comma separated, no name)
-                // Example: 573314.142 3505675.230 815.144
-                const parts = trimmed.split(/[\\s,]+/);
+                const parts = trimmed.split(/[\s,]+/);
                 
                 if (parts.length >= 2) {
                     const easting = parseFloat(parts[0]);
@@ -1123,44 +1203,229 @@
             return points;
         }
 
-        function parseCSV(content) {
+        // Universal TXT parser - tries multiple formats
+        function parseTXTUniversal(content) {
+            const lines = content.split('\n').filter(l => l.trim() && !l.trim().startsWith('#') && !l.trim().startsWith('//'));
             const points = [];
-            const lines = content.split('\\n');
-            
+            let pointIndex = 1;
+
             for (const line of lines) {
                 const trimmed = line.trim();
-                if (!trimmed || trimmed.startsWith('#')) continue;
-                
-                // CSV format: Name, X, Y, Z or X, Y, Z
-                const parts = trimmed.split(/[,;\\t]+/).map(p => p.trim());
-                
-                if (parts.length >= 3) {
-                    // Check if first part is a number or name
-                    const firstIsNumber = !isNaN(parseFloat(parts[0]));
-                    
-                    let name, easting, northing, elevation;
-                    
-                    if (firstIsNumber) {
-                        // Format: X, Y, Z
-                        name = `POINT_${points.length + 1}`;
-                        easting = parseFloat(parts[0]);
-                        northing = parseFloat(parts[1]);
-                        elevation = parts.length >= 3 ? parseFloat(parts[2]) : 0;
-                    } else {
-                        // Format: Name, X, Y, Z
-                        name = parts[0];
-                        easting = parseFloat(parts[1]);
-                        northing = parseFloat(parts[2]);
-                        elevation = parts.length >= 4 ? parseFloat(parts[3]) : 0;
-                    }
-                    
-                    if (!isNaN(easting) && !isNaN(northing)) {
-                        points.push({ name, easting, northing, elevation });
+                let parsed = null;
+
+                // Try format 1: Name X Y Z (space/tab separated)
+                parsed = tryParseFormat1(trimmed);
+                if (parsed) {
+                    points.push(parsed);
+                    continue;
+                }
+
+                // Try format 2: X Y Z (space/tab separated, no name)
+                parsed = tryParseFormat2(trimmed);
+                if (parsed) {
+                    points.push(parsed);
+                    continue;
+                }
+
+                // Try format 3: Name,X,Y,Z (comma separated)
+                parsed = tryParseFormat3(trimmed);
+                if (parsed) {
+                    points.push(parsed);
+                    continue;
+                }
+
+                // Try format 4: X,Y,Z (comma separated, no name)
+                parsed = tryParseFormat4(trimmed);
+                if (parsed) {
+                    points.push(parsed);
+                    continue;
+                }
+
+                // Try format 5: Mixed with headers
+                parsed = tryParseFormat5(trimmed);
+                if (parsed) {
+                    points.push(parsed);
+                    continue;
+                }
+            }
+
+            return points;
+        }
+
+        function tryParseFormat1(line) {
+            // Name X Y Z (space/tab separated)
+            const parts = line.split(/[\s\t]+/).filter(p => p);
+            if (parts.length >= 4) {
+                const nums = parts.slice(1).map(p => parseFloat(p));
+                if (nums.every(n => !isNaN(n)) && nums[0] > 100000 && nums[1] > 100000) {
+                    return {
+                        name: parts[0],
+                        easting: nums[0],
+                        northing: nums[1],
+                        elevation: nums[2] || 0
+                    };
+                }
+            }
+            return null;
+        }
+
+        function tryParseFormat2(line) {
+            // X Y Z (space/tab separated, no name)
+            const parts = line.split(/[\s\t]+/).filter(p => p);
+            if (parts.length >= 2) {
+                const nums = parts.map(p => parseFloat(p));
+                if (nums.every(n => !isNaN(n)) && nums[0] > 100000 && nums[1] > 100000) {
+                    return {
+                        name: `POINT_${Math.floor(Math.random() * 10000)}`,
+                        easting: nums[0],
+                        northing: nums[1],
+                        elevation: nums[2] || 0
+                    };
+                }
+            }
+            return null;
+        }
+
+        function tryParseFormat3(line) {
+            // Name,X,Y,Z (comma separated)
+            const parts = line.split(/[,;]+/).map(p => p.trim());
+            if (parts.length >= 4) {
+                const nums = parts.slice(1).map(p => parseFloat(p));
+                if (nums.every(n => !isNaN(n)) && nums[0] > 100000 && nums[1] > 100000) {
+                    return {
+                        name: parts[0],
+                        easting: nums[0],
+                        northing: nums[1],
+                        elevation: nums[2] || 0
+                    };
+                }
+            }
+            return null;
+        }
+
+        function tryParseFormat4(line) {
+            // X,Y,Z (comma separated, no name)
+            const parts = line.split(/[,;]+/).map(p => p.trim());
+            if (parts.length >= 2) {
+                const nums = parts.map(p => parseFloat(p));
+                if (nums.every(n => !isNaN(n)) && nums[0] > 100000 && nums[1] > 100000) {
+                    return {
+                        name: `POINT_${Math.floor(Math.random() * 10000)}`,
+                        easting: nums[0],
+                        northing: nums[1],
+                        elevation: nums[2] || 0
+                    };
+                }
+            }
+            return null;
+        }
+
+        function tryParseFormat5(line) {
+            // Try to detect coordinates anywhere in the line
+            const numbers = line.match(/\d+\.?\d*/g);
+            if (numbers && numbers.length >= 2) {
+                const vals = numbers.map(n => parseFloat(n));
+                // Find two consecutive large numbers (coordinates)
+                for (let i = 0; i < vals.length - 1; i++) {
+                    if (vals[i] > 100000 && vals[i+1] > 100000) {
+                        const nameMatch = line.match(/[A-Za-z_][A-Za-z0-9_]*/);
+                        return {
+                            name: nameMatch ? nameMatch[0] : `POINT_${Math.floor(Math.random() * 10000)}`,
+                            easting: vals[i],
+                            northing: vals[i+1],
+                            elevation: vals[i+2] || 0
+                        };
                     }
                 }
             }
+            return null;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // EXPORT FUNCTIONS - NEW!
+        // ═══════════════════════════════════════════════════════════════
+
+        function toggleExportMenu() {
+            const menu = document.getElementById('exportMenu');
+            menu.classList.toggle('show');
+        }
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const menu = document.getElementById('exportMenu');
+            const button = event.target.closest('.export-menu');
+            if (!button && menu.classList.contains('show')) {
+                menu.classList.remove('show');
+            }
+        });
+
+        function exportToTXT() {
+            if (state.points.length === 0) {
+                showToast('لا توجد نقاط للتصدير', 'error');
+                return;
+            }
+
+            let content = '# Geodesic Points Export - Algeria\n';
+            content += '# Format: Name Easting Northing Elevation Zone\n';
+            content += '# Generated: ' + new Date().toLocaleString('ar-DZ') + '\n';
+            content += '# Total Points: ' + state.points.length + '\n';
+            content += '========================================\n\n';
+
+            state.points.forEach((p, i) => {
+                content += `${p.name}\t${p.easting.toFixed(3)}\t${p.northing.toFixed(3)}\t${p.elevation.toFixed(3)}\t${p.zone}\n`;
+            });
+
+            downloadFile(content, 'geodesy_points.txt', 'text/plain');
+            showToast(`تم تصدير ${state.points.length} نقطة إلى TXT`, 'success');
+            toggleExportMenu();
+        }
+
+        function exportToCSV() {
+            if (state.points.length === 0) {
+                showToast('لا توجد نقاط للتصدير', 'error');
+                return;
+            }
+
+            let content = 'Name,Easting,Northing,Elevation,Zone,Latitude,Longitude,CreatedAt\n';
             
-            return points;
+            state.points.forEach(p => {
+                content += `${p.name},${p.easting.toFixed(3)},${p.northing.toFixed(3)},${p.elevation.toFixed(3)},${p.zone},${p.lat.toFixed(6)},${p.lng.toFixed(6)},${p.createdAt}\n`;
+            });
+
+            downloadFile(content, 'geodesy_points.csv', 'text/csv');
+            showToast(`تم تصدير ${state.points.length} نقطة إلى CSV`, 'success');
+            toggleExportMenu();
+        }
+
+        function exportToXYZ() {
+            if (state.points.length === 0) {
+                showToast('لا توجد نقاط للتصدير', 'error');
+                return;
+            }
+
+            let content = '# XYZ Format Export\n';
+            content += '# X(Easting) Y(Northing) Z(Elevation)\n';
+            content += '# ' + state.points.length + ' points\n\n';
+
+            state.points.forEach(p => {
+                content += `${p.easting.toFixed(3)} ${p.northing.toFixed(3)} ${p.elevation.toFixed(3)}\n`;
+            });
+
+            downloadFile(content, 'geodesy_points.xyz', 'text/plain');
+            showToast(`تم تصدير ${state.points.length} نقطة إلى XYZ`, 'success');
+            toggleExportMenu();
+        }
+
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType + ';charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         // ═══════════════════════════════════════════════════════════════
